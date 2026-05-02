@@ -39,5 +39,6 @@ def process_ticket(row, system):
         "Response": response,
         "Product Area": product_area,
         "Status": decision,
-        "Request Type": request_type
+        "Request Type": request_type,
+        "Justification": justification
     }

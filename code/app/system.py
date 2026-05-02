@@ -187,18 +187,48 @@ class LLMSystem:
     
     # ========== Classification ==========
     def classify(self, issue: str) -> str:
-        """Classify the request type."""
+        """Classify the request type into the allowed taxonomy."""
         system_prompt = """Classify the support ticket into one of these categories:
-- technical_issue
-- billing
-- account
+- product issue
 - feature_request
-- general_inquiry
+- bug
+- invalid
 
-Respond with only the category name."""
+If the ticket is about a real product problem or operational issue, return `product issue`.
+If it is a request for new behavior or enhancement, return `feature_request`.
+If it is a report of malfunction or error, return `bug`.
+If it is not a valid support request or cannot be answered, return `invalid`.
+
+Respond with only the category name exactly as shown."""
         
         result = self._call_llm(system_prompt, issue)
-        return result.strip()
+        return self._normalize_request_type(result, issue)
+
+    def _normalize_request_type(self, result: str, issue: str) -> str:
+        """Normalize classifier output to one of the allowed values."""
+        allowed = {
+            "product issue": "product issue",
+            "product_issue": "product issue",
+            "feature_request": "feature_request",
+            "feature request": "feature_request",
+            "bug": "bug",
+            "invalid": "invalid"
+        }
+        normalized = result.strip().lower()
+        if normalized in allowed:
+            return allowed[normalized]
+        normalized = normalized.replace("-", " ").replace("_", " ")
+        if normalized in allowed:
+            return allowed[normalized]
+        # Heuristic fallback based on issue text
+        issue_lower = issue.lower()
+        if any(word in issue_lower for word in ["bug", "error", "crash", "fail", "failure", "not working", "issue"]):
+            return "bug"
+        if any(word in issue_lower for word in ["feature", "enhancement", "add", "support for", "ability to", "request"]):
+            return "feature_request"
+        if any(word in issue_lower for word in ["invalid", "spam", "not a support", "question", "how do i", "where is", "what is"]):
+            return "invalid"
+        return "product issue"
     
     # ========== Product Area Detection ==========
     def detect_area(self, docs: list) -> str:
@@ -206,14 +236,12 @@ Respond with only the category name."""
         if not docs:
             return "unknown"
         
-        # Extract product area from doc paths
+        # Use the immediate parent folder of the retrieved file as the product area
         areas = []
         for doc_path, _ in docs:
-            parts = doc_path.split(os.sep)
-            if "data" in parts:
-                idx = parts.index("data")
-                if idx + 1 < len(parts):
-                    areas.append(parts[idx + 1])
+            parent_folder = os.path.basename(os.path.dirname(doc_path))
+            if parent_folder:
+                areas.append(parent_folder)
         
         if areas:
             return max(set(areas), key=areas.count)
